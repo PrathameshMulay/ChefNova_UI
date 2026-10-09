@@ -46,6 +46,13 @@ html, body, [class*="css"] { font-family: Inter, sans-serif; }
 .page-subtitle { color: #777; font-size: 14px; margin-bottom: 22px; }
 .section-title { font-size: 19px; font-weight: 650; color: #202020; margin: 5px 0 13px; }
 
+/* Keep form labels readable on the light recipe background */
+[data-testid="stSelectbox"] label,
+[data-testid="stCheckbox"] label,
+[data-testid="stTextArea"] label {
+    color: #111111 !important;
+}
+
 .card, .chat-card {
     background: rgba(255,255,255,.94);
     border: 1px solid rgba(224,219,209,.95);

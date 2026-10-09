@@ -1,115 +1,96 @@
-                    substitution_lines.append(f"**{item}:** try {recipe['substitutions'][item]}")
-            if substitution_lines:
-                st.markdown("**Possible substitutions**")
-                for line in substitution_lines:
-                    st.markdown(f"- {line}")
-        else:
-            st.success("Cook now: every required ingredient is available in your confirmed pantry.")
-        st.markdown("</div>", unsafe_allow_html=True)
+import io
+import re
+from copy import deepcopy
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown('<div class="small-note">AFTER COOKING</div>', unsafe_allow_html=True)
-        st.markdown('<div style="font-size:18px;font-weight:650;margin-top:8px;">How was this recipe?</div>', unsafe_allow_html=True)
-        f1, f2, f3 = st.columns(3)
-        if f1.button("👍 Loved", key=f"love_{recipe['id']}", use_container_width=True):
-            st.session_state.feedback[recipe["id"]] = "Loved"
-        if f2.button("😐 Okay", key=f"okay_{recipe['id']}", use_container_width=True):
-            st.session_state.feedback[recipe["id"]] = "Okay"
-        if f3.button("👎 No", key=f"no_{recipe['id']}", use_container_width=True):
-            st.session_state.feedback[recipe["id"]] = "Disliked"
-        if recipe["id"] in st.session_state.feedback:
-            st.caption(f"Saved feedback: {st.session_state.feedback[recipe['id']]}. This can be used for future personalization.")
-        st.markdown("</div>", unsafe_allow_html=True)
+import pandas as pd
+import streamlit as st
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("← Back to recommendations", use_container_width=True):
-            st.session_state.page = "Recommendations"
-            st.rerun()
+try:
+    import speech_recognition as sr
+except ImportError:
+    sr = None
 
 
-# ---------- Evaluation plan ----------
-def show_evaluation_plan():
-    st.markdown('<div class="page-title">Evaluation Plan</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="page-subtitle">A concrete testing plan addresses the feedback asking us to define receipt sources, recipe sources, and measurable accuracy targets.</div>',
-        unsafe_allow_html=True,
-    )
+st.set_page_config(page_title="ChefNova", page_icon="🍳", layout="wide")
 
-    c1, c2 = st.columns(2, gap="large")
-    with c1:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown('<div class="section-title">Receipt test set</div>', unsafe_allow_html=True)
-        st.markdown(
-            """
-            **Suggested sources**
-            - Walmart
-            - Target
-            - Costco
-            - Aldi
-            - Instacart / grocery-order screenshots
+# ---------- Visual system ----------
+st.markdown(
+    """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+html, body, [class*="css"] { font-family: Inter, sans-serif; }
+.stApp {
+    background: linear-gradient(rgba(248,246,241,.91),rgba(248,246,241,.95)),
+                url("https://images.unsplash.com/photo-1498837167922-ddd27525d352?auto=format&fit=crop&w=2200&q=85");
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+    color: #202020;
+}
+[data-testid="stSidebar"] {
+    background: rgba(255,255,255,.94);
+    border-right: 1px solid #e3ded5;
+    backdrop-filter: blur(12px);
+}
+[data-testid="stHeader"] { background: rgba(248,246,241,.75); }
+[data-testid="stAppViewContainer"] { background: transparent; }
 
-            **Suggested conditions**
-            - clear digital receipt
-            - clear phone photo
-            - slightly blurry / folded receipt
-            - long receipt
-            - mixed grocery + non-food receipt
+/* Keep Streamlit text inputs readable on Streamlit Cloud / dark-theme clients */
+[data-testid="stTextArea"] label,
+[data-testid="stTextInput"] label,
+[data-testid="stChatInput"] label,
+[data-testid="stSelectbox"] label,
+[data-testid="stCheckbox"] label {
+    color: #111111 !important;
+}
 
-            Start with **20–30 receipts** so the team can manually create ground-truth labels and calculate precision/recall.
-            """
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
+[data-testid="stTextArea"] textarea,
+[data-testid="stTextInput"] input,
+[data-testid="stChatInput"] textarea {
+    background-color: #ffffff !important;
+    color: #111111 !important;
+    -webkit-text-fill-color: #111111 !important;
+    border: 1px solid #d8d2c8 !important;
+    border-radius: 10px !important;
+}
 
-    with c2:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown('<div class="section-title">Recipe source</div>', unsafe_allow_html=True)
-        st.markdown(
-            """
-            **Current prototype:** ChefNova curated demo recipe dataset.
+[data-testid="stTextArea"] textarea::placeholder,
+[data-testid="stTextInput"] input::placeholder,
+[data-testid="stChatInput"] textarea::placeholder {
+    color: #888888 !important;
+    -webkit-text-fill-color: #888888 !important;
+    opacity: 1 !important;
+}
 
-            **Next implementation choice:** replace or expand it with one clearly documented source such as:
-            - Spoonacular API
-            - TheMealDB
-            - RecipeNLG / another licensed dataset
+/* Keep dropdowns dark as designed, while their labels remain black */
+[data-testid="stSelectbox"] [data-baseweb="select"] > div {
+    background-color: #292833 !important;
+    color: #ffffff !important;
+}
+[data-testid="stSelectbox"] [data-baseweb="select"] input,
+[data-testid="stSelectbox"] [data-baseweb="select"] span {
+    color: #ffffff !important;
+}
+[data-testid="stMainBlockContainer"] { padding-top: 2.5rem; }
+[data-testid="stSidebar"] > div:first-child { padding-top: 1.2rem; }
 
-            Retrieval should happen **before** the LLM explanation step so ChefNova ranks grounded recipes instead of inventing every recipe from scratch.
-            """
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
+.brand { padding: 0 8px 24px; }
+.brand-title { font-size: 25px; font-weight: 700; color: #171717; }
+.brand-sub { font-size: 12px; color: #777; margin-top: 3px; }
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">Target metrics</div>', unsafe_allow_html=True)
-    metric_df = pd.DataFrame(
-        [
-            ["Grocery item precision", "≥ 90%", "Of extracted grocery items, how many are truly groceries?"],
-            ["Grocery item recall", "≥ 85%", "Of true grocery items, how many were extracted?"],
-            ["Quantity extraction accuracy", "≥ 80%", "Was the quantity parsed correctly?"],
-            ["Manual / voice parsing accuracy", "≥ 90%", "Did natural language become the correct structured items?"],
-            ["Dietary compliance", "100% target", "Hard dietary filters should never be violated."],
-            ["Cook-now feasibility", "≥ 95%", "Recipes labeled Cook now should truly require no missing core ingredients."],
-            ["Top-3 recommendation relevance", "≥ 80% positive", "Users find at least one top recommendation acceptable."],
-        ],
-        columns=["Metric", "Target", "Meaning"],
-    )
-    st.dataframe(metric_df, use_container_width=True, hide_index=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+.page-title { font-size: 31px; font-weight: 700; color: #171717; margin-bottom: 3px; letter-spacing: -.02em; }
+.hero-accent { display: inline-block; width: 42px; height: 4px; border-radius: 20px; background: #c9794b; margin-bottom: 12px; }
+.page-subtitle { color: #777; font-size: 14px; margin-bottom: 22px; }
+.section-title { font-size: 19px; font-weight: 650; color: #202020; margin: 5px 0 13px; }
 
+.card, .chat-card {
+    background: rgba(255,255,255,.94);
+    border: 1px solid rgba(224,219,209,.95);
+    border-radius: 18px;
+    padding: 20px;
+    box-shadow: 0 8px 30px rgba(74,62,45,.07);
+    backdrop-filter: blur(7px);
+}
 
-# ---------- Router ----------
-if st.session_state.page == "Home":
-    show_home()
-elif st.session_state.page == "My Inventory":
-    show_inventory()
-elif st.session_state.page == "Get Recipe":
-    show_get_recipe()
-elif st.session_state.page == "Recommendations":
-    show_recommendations()
-elif st.session_state.page == "Recipe Details":
-    show_recipe_details()
-elif st.session_state.page == "Evaluation Plan":
-    show_evaluation_plan()
-else:
-    st.session_state.page = "Home"
-    st.rerun()
+.recipe-card {
+    background: rgba(255,255,255,.96);
